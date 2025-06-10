@@ -157,6 +157,7 @@ int main(int argc, char* argv[]) {
         if (!command.empty()) {
             std::cout << "Command: " << command << std::endl;
             std::string result;
+
 #ifdef _WIN32
             std::string fullCmd = "cmd /C " + command + " 2>&1";
             FILE* pipe = _popen(fullCmd.c_str(), "r");
@@ -172,6 +173,7 @@ int main(int argc, char* argv[]) {
 #ifdef _WIN32
                 _pclose(pipe);
 #else
+
                 pclose(pipe);
 #endif
             }
