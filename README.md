@@ -3,7 +3,8 @@
 This repository contains a simple example of a command and control setup with a
 Python web server and a minimal C++ client. The server keeps track of clients
 that register with it and exposes an endpoint to view the list of currently
-connected clients.
+connected clients. The server also allows sending commands to individual
+clients and stores their latest results.
 
 ## Server
 
@@ -24,6 +25,14 @@ By default the server listens on port `8000`.
   register themselves.
 - `GET /clients` – Returns a JSON array containing the IDs of all registered
   clients.
+- `GET /poll?client_id=<id>` – Long polls the server for a pending command 
+  for the given client. Returns `{"command": "..."}`.
+- `POST /result` – Clients post back command results using a JSON payload
+  `{"client_id": "<id>", "result": "<output>"}`.
+- `POST /send` – Queues a command for a specific client using a payload
+  `{"client_id": "<id>", "command": "<cmd>"}`.
+- `GET /result?client_id=<id>` – Retrieves the latest stored result for a
+  client.
 
 ## Client
 
@@ -52,4 +61,6 @@ client.exe my_client_id
 ```
 
 After running one or more clients, requesting `http://localhost:8000/clients`
-will show the list of registered clients.
+will show the list of registered clients. The web interface available at
+`http://localhost:8000/` lets you send commands to individual clients and view
+their most recent results.
