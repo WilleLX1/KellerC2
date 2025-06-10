@@ -13,7 +13,7 @@ modules, so no additional dependencies are required.
 ### Running the server
 
 ```bash
-python3 server.py
+python server.py
 ```
 
 By default the server listens on port `8000`.
@@ -30,16 +30,25 @@ By default the server listens on port `8000`.
 `client.cpp` demonstrates a small program that connects to the server and
 registers itself.
 
-### Building the client
+### Building the client (Windows)
+
+Use a Windows toolchain such as Visual Studio or MinGW. With MSVC, you can
+compile the client using:
+
+```cmd
+cl /EHsc client.cpp ws2_32.lib
+```
+
+If you are using MinGW, the command is:
 
 ```bash
-g++ -std=c++11 client.cpp -o client
+g++ -std=c++11 client.cpp -lws2_32 -o client.exe
 ```
 
 ### Running the client
 
 ```bash
-./client my_client_id
+client.exe my_client_id
 ```
 
 After running one or more clients, requesting `http://localhost:8000/clients`
