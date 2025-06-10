@@ -66,6 +66,9 @@ The sample client polls the server roughly once per second to look for
 commands and post results. When no command is available it prints
 "waiting..." so you can tell it is still running.
 
+The client now parses HTTP responses using the reported `Content-Length`
+header, which lets it handle large command output reliably.
+
 After running one or more clients, requesting `http://localhost:8000/clients`
 will show the list of registered clients. The web interface available at
 `http://localhost:8000/` lets you send commands to individual clients and view

