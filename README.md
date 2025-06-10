@@ -26,8 +26,8 @@ By default the server listens on port `8000`.
 
 - `POST /register` – Clients post a JSON payload `{"client_id": "<id>"}` to
   register themselves.
-- `GET /clients` – Returns a JSON array containing the IDs of all registered
-  clients.
+- `GET /clients` – Returns a JSON array with objects describing each
+  connected client: `[{"id": "<id>", "lat": <latitude>, "lon": <longitude>}]`.
 - `GET /poll?client_id=<id>` – Long polls the server for a pending command for
   the given client. Returns `{"command": "..."}`.
 - `POST /result` – Clients post back command results using a JSON payload
@@ -71,7 +71,7 @@ commands and post results. When no command is available it prints
 The client now parses HTTP responses using the reported `Content-Length`
 header, which lets it handle large command output reliably.
 
-After running one or more clients, requesting `http://localhost:8000/clients`
-will show the list of registered clients. The web interface available at
-`http://localhost:8000/` lets you send commands to individual clients and view
-their most recent results.
+After running one or more clients, visiting `http://localhost:8000/` opens a
+web page with a world map. Each connected client appears as a marker on the
+map. Clicking a marker reveals a small form for sending a command to that
+client and displays its most recent result.

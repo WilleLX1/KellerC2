@@ -173,6 +173,7 @@ int main(int argc, char* argv[]) {
 #ifdef _WIN32
                 _pclose(pipe);
 #else
+
                 pclose(pipe);
 #endif
             }
@@ -202,7 +203,6 @@ int main(int argc, char* argv[]) {
 #ifdef _WIN32
         Sleep(1000);
 #else
-
         sleep(1);
 #endif
     }
