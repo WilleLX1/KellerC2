@@ -8,8 +8,9 @@ clients and stores their latest results.
 
 ## Server
 
-The server is implemented in `server.py` and uses Python's built-in HTTP
-modules, so no additional dependencies are required.
+The server is implemented in `server.py` using Python's built-in HTTP
+modules. It relies on `ThreadingHTTPServer` so multiple clients can poll
+for commands at the same time without blocking one another.
 
 ### Running the server
 
@@ -25,8 +26,8 @@ By default the server listens on port `8000`.
   register themselves.
 - `GET /clients` – Returns a JSON array containing the IDs of all registered
   clients.
-- `GET /poll?client_id=<id>` – Long polls the server for a pending command 
-  for the given client. Returns `{"command": "..."}`.
+- `GET /poll?client_id=<id>` – Long polls the server for a pending command for
+  the given client. Returns `{"command": "..."}`.
 - `POST /result` – Clients post back command results using a JSON payload
   `{"client_id": "<id>", "result": "<output>"}`.
 - `POST /send` – Queues a command for a specific client using a payload
@@ -59,6 +60,9 @@ g++ -std=c++11 client.cpp -lws2_32 -o client.exe
 ```bash
 client.exe my_client_id
 ```
+
+The sample client polls the server roughly once per second to look for
+commands and post results.
 
 After running one or more clients, requesting `http://localhost:8000/clients`
 will show the list of registered clients. The web interface available at

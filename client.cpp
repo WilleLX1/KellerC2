@@ -116,11 +116,11 @@ int main(int argc, char* argv[]) {
             resReq += resBody;
             send_request(res, resReq);
         }
-
 #ifdef _WIN32
-        Sleep(3000);
+        Sleep(1000);
 #else
-        sleep(3);
+        sleep(1);
+
 #endif
     }
 

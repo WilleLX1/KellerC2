@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import HTTPServer, ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 import json
 import queue
@@ -152,7 +152,8 @@ class Handler(BaseHTTPRequestHandler):
 
 def run(port=8000):
     server_address = ('', port)
-    httpd = HTTPServer(server_address, Handler)
+    # ThreadingHTTPServer allows multiple clients to poll concurrently
+    httpd = ThreadingHTTPServer(server_address, Handler)
     print(f'Starting server on port {port}...')
     httpd.serve_forever()
 
