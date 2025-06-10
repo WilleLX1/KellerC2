@@ -138,6 +138,7 @@ int main(int argc, char* argv[]) {
                 }
             }
             std::string resBody = "{\"client_id\":\"" + client_id + "\",\"result\":\"" + esc + "\"}";
+
             std::string resReq = "POST /result HTTP/1.1\r\n";
             resReq += "Host: " + host + "\r\n";
             resReq += "Content-Type: application/json\r\n";
