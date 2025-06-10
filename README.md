@@ -38,7 +38,8 @@ By default the server listens on port `8000`.
 ## Client
 
 `client.cpp` demonstrates a small program that connects to the server and
-registers itself.
+registers itself. When it receives a command, the client now executes it on the
+local system and sends the command output back to the server.
 
 ### Building the client (Windows)
 

