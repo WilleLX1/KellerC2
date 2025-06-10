@@ -11,6 +11,8 @@ clients and stores their latest results.
 The server is implemented in `server.py` using Python's built-in HTTP
 modules. It relies on `ThreadingHTTPServer` so multiple clients can poll
 for commands at the same time without blocking one another.
+Responses now include a `Content-Length` header so the C++ client can
+determine message boundaries reliably.
 
 ### Running the server
 
