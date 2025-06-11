@@ -43,9 +43,7 @@ INDEX_PAGE = """
             <div>Latest:</div>
             <pre id=res_${c.id}>${escapeHtml(c.result || '')}</pre>
             <div>History:</div>
-            <ul id=hist_${c.id}></ul>
-            <div>Commands:</div>
-            <ul id=cmd_${c.id}></ul>`;
+            <ul id=hist_${c.id}></ul>`;
     }
 
     async function load() {
@@ -73,8 +71,10 @@ INDEX_PAGE = """
             m.off('popupopen');
             m.on('popupopen', () => {
                 loadHistory(c.id);
-                loadCmdHistory(c.id);
             });
+            if (m.isPopupOpen()) {
+                loadHistory(c.id);
+            }
             m.setOpacity(age > STALE ? 0.5 : 1);
             const pre = document.getElementById('res_'+c.id);
             if (pre) pre.textContent = c.result || '';
@@ -119,28 +119,6 @@ async function loadHistory(id) {
                 const li = document.createElement('li');
                 const ts = new Date(r.ts * 1000).toLocaleString();
                 li.innerHTML = `<b>${ts}</b><br><pre>${escapeHtml(r.result)}</pre>`;
-                ul.appendChild(li);
-            });
-        } else {
-            ul.textContent = 'Error';
-        }
-    } catch (err) {
-        ul.textContent = 'Error';
-    }
-}
-
-async function loadCmdHistory(id) {
-    const ul = document.getElementById('cmd_'+id);
-    if (!ul) return;
-    ul.innerHTML = '';
-    try {
-        const res = await fetch('/commands?client_id='+encodeURIComponent(id));
-        if (res.ok) {
-            const items = await res.json();
-            items.forEach(r => {
-                const li = document.createElement('li');
-                const ts = new Date(r.ts * 1000).toLocaleString();
-                li.textContent = `${ts} - ${r.command}`;
                 ul.appendChild(li);
             });
         } else {
