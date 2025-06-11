@@ -39,7 +39,10 @@ INDEX_PAGE = """
             <input name=cmd placeholder=Command />
             <button type=submit>Send</button>
             <span id=msg_${c.id}></span>
-            </form><pre id=res_${c.id}>${escapeHtml(c.result || '')}</pre>`;
+            </form>
+            <div>Latest:</div>
+            <pre id=res_${c.id}>${escapeHtml(c.result || '')}</pre>
+            <ul id=hist_${c.id}></ul>`;
     }
 
     async function load() {
@@ -59,20 +62,20 @@ INDEX_PAGE = """
             const content = popupContent(c);
             if (!m) {
                 m = L.marker([c.lat, c.lon]).addTo(map);
-                m.bindPopup(content);
                 markers[c.id] = m;
-            } else {
-                m.setLatLng([c.lat, c.lon]);
-                if (m.getPopup()) m.getPopup().setContent(content);
-                else m.bindPopup(content);
             }
+            m.setLatLng([c.lat, c.lon]);
+            if (m.getPopup()) m.getPopup().setContent(content);
+            else m.bindPopup(content);
+            m.off('popupopen');
+            m.on('popupopen', () => loadHistory(c.id));
             m.setOpacity(age > STALE ? 0.5 : 1);
             const pre = document.getElementById('res_'+c.id);
             if (pre) pre.textContent = c.result || '';
         });
     }
 
-    async function sendCmd(e, form, id) {
+async function sendCmd(e, form, id) {
         e.preventDefault();
         const cmd = form.cmd.value;
         const msg = document.getElementById('msg_'+id);
@@ -95,8 +98,30 @@ INDEX_PAGE = """
             msg.textContent = 'Error';
             msg.style.color = 'red';
         }
-        form.cmd.value='';
+    form.cmd.value='';
+}
+
+async function loadHistory(id) {
+    const ul = document.getElementById('hist_'+id);
+    if (!ul) return;
+    ul.innerHTML = '';
+    try {
+        const res = await fetch('/history?client_id='+encodeURIComponent(id));
+        if (res.ok) {
+            const items = await res.json();
+            items.forEach(r => {
+                const li = document.createElement('li');
+                const ts = new Date(r.ts * 1000).toLocaleString();
+                li.innerHTML = `<b>${ts}</b><br><pre>${escapeHtml(r.result)}</pre>`;
+                ul.appendChild(li);
+            });
+        } else {
+            ul.textContent = 'Error';
+        }
+    } catch (err) {
+        ul.textContent = 'Error';
     }
+}
 
     window.onload = () => {
         map = L.map('map').setView([20,0], 2);
@@ -135,6 +160,11 @@ with conn_lock, conn:
         'id INTEGER PRIMARY KEY AUTOINCREMENT,'
         ' client_id TEXT, command TEXT, ts REAL)'
     )
+    conn.execute(
+        'CREATE TABLE IF NOT EXISTS results('
+        'id INTEGER PRIMARY KEY AUTOINCREMENT,'
+        ' client_id TEXT, result TEXT, ts REAL)'
+    )
 
 REMOVE_CLIENT_AFTER = int(os.environ.get('REMOVE_CLIENT_AFTER', '3600'))
 
@@ -146,6 +176,10 @@ def cleanup_task():
             conn.execute('DELETE FROM clients WHERE last_seen < ?', (cutoff,))
             conn.execute(
                 'DELETE FROM commands WHERE client_id NOT IN '
+                '(SELECT id FROM clients)'
+            )
+            conn.execute(
+                'DELETE FROM results WHERE client_id NOT IN '
                 '(SELECT id FROM clients)'
             )
         time.sleep(60)
@@ -244,7 +278,14 @@ class Handler(BaseHTTPRequestHandler):
                 res = payload.get('result')
                 with conn_lock:
                     if cid and conn.execute('SELECT 1 FROM clients WHERE id=?', (cid,)).fetchone():
-                        conn.execute('UPDATE clients SET result=?, last_seen=? WHERE id=?', (res, now, cid))
+                        conn.execute(
+                            'UPDATE clients SET result=?, last_seen=? WHERE id=?',
+                            (res, now, cid)
+                        )
+                        conn.execute(
+                            'INSERT INTO results(client_id, result, ts) VALUES (?,?,?)',
+                            (cid, res, now)
+                        )
                         conn.commit()
                         body = b'Result stored'
                         self.send_response(200)
@@ -293,6 +334,26 @@ class Handler(BaseHTTPRequestHandler):
                         conn.execute('DELETE FROM commands WHERE id=?', (cmd_row['id'],))
                     conn.commit()
                     body = json.dumps({'command': cmd}).encode()
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Content-Length', str(len(body)))
+                    self.end_headers()
+                    self._safe_write(body)
+                else:
+                    self.send_response(404)
+                    self.send_header('Content-Length', '0')
+                    self.end_headers()
+        elif parsed.path == '/history':
+            qs = parse_qs(parsed.query)
+            cid = qs.get('client_id', [None])[0]
+            with conn_lock:
+                exists = conn.execute('SELECT 1 FROM clients WHERE id=?', (cid,)).fetchone()
+                if exists:
+                    rows = conn.execute(
+                        'SELECT result, ts FROM results WHERE client_id=? ORDER BY ts DESC LIMIT 10',
+                        (cid,)
+                    ).fetchall()
+                    body = json.dumps([dict(r) for r in rows]).encode()
                     self.send_response(200)
                     self.send_header('Content-Type', 'application/json')
                     self.send_header('Content-Length', str(len(body)))

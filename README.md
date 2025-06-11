@@ -46,6 +46,8 @@ be changed by setting the `REMOVE_CLIENT_AFTER` environment variable.
   `{"client_id": "<id>", "command": "<cmd>"}`.
 - `GET /result?client_id=<id>` – Retrieves the latest stored result for a
   client.
+- `GET /history?client_id=<id>` – Returns up to 10 recent results for a client
+  as `[{"result": "<output>", "ts": <epoch_seconds>}, ...]`.
 
 ## Client
 
