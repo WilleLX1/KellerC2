@@ -173,7 +173,6 @@ int main(int argc, char* argv[]) {
 #ifdef _WIN32
                 _pclose(pipe);
 #else
-
                 pclose(pipe);
 #endif
             }
@@ -211,5 +210,6 @@ int main(int argc, char* argv[]) {
 #ifdef _WIN32
     WSACleanup();
 #endif
+
     return 0;
 }

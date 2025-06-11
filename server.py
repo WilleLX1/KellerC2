@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 from http.server import HTTPServer, ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
+from urllib.request import urlopen
+from urllib.error import URLError
 import json
 import queue
 import random
@@ -75,6 +77,18 @@ client_queues = {}
 client_results = {}
 client_locations = {}
 
+def geolocate(ip):
+    """Return (lat, lon) for the given IP using ip-api.com."""
+    try:
+        with urlopen(f"http://ip-api.com/json/{ip}", timeout=5) as r:
+            data = json.load(r)
+            if data.get("status") == "success":
+                return float(data.get("lat", 0)), float(data.get("lon", 0))
+    except URLError:
+        pass
+    # fall back to a random location if lookup fails
+    return random.uniform(-60, 60), random.uniform(-180, 180)
+
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers.get('Content-Length', 0))
@@ -90,10 +104,9 @@ class Handler(BaseHTTPRequestHandler):
                 clients.add(client_id)
                 client_queues.setdefault(client_id, queue.Queue())
                 client_results.setdefault(client_id, '')
-                client_locations.setdefault(client_id, (
-                    random.uniform(-60, 60),
-                    random.uniform(-180, 180)
-                ))
+                if client_id not in client_locations:
+                    ip = self.client_address[0]
+                    client_locations[client_id] = geolocate(ip)
                 body = b'Registered'
                 self.send_response(200)
                 self.send_header('Content-Length', str(len(body)))

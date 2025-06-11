@@ -28,6 +28,8 @@ By default the server listens on port `8000`.
   register themselves.
 - `GET /clients` – Returns a JSON array with objects describing each
   connected client: `[{"id": "<id>", "lat": <latitude>, "lon": <longitude>}]`.
+  The latitude and longitude are estimated from the client's IP address.
+
 - `GET /poll?client_id=<id>` – Long polls the server for a pending command for
   the given client. Returns `{"command": "..."}`.
 - `POST /result` – Clients post back command results using a JSON payload
@@ -73,5 +75,7 @@ header, which lets it handle large command output reliably.
 
 After running one or more clients, visiting `http://localhost:8000/` opens a
 web page with a world map. Each connected client appears as a marker on the
-map. Clicking a marker reveals a small form for sending a command to that
-client and displays its most recent result.
+map. The server estimates each client's location using its IP address so the
+markers roughly indicate where clients are connecting from. Clicking a marker
+reveals a small form for sending a command to that client and displays its
+most recent result.
