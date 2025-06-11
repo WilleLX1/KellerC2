@@ -23,6 +23,12 @@ python server.py
 
 By default the server listens on port `8000`.
 
+All client registrations, queued commands and results are stored in an
+`SQLite` database named `keller.db`. Each time a client polls the `/poll`
+endpoint its `last_seen` timestamp is updated. A background task runs every
+minute to remove clients that have not been seen for an hour. The interval can
+be changed by setting the `REMOVE_CLIENT_AFTER` environment variable.
+
 ### Endpoints
 
 - `POST /register` – Clients post a JSON payload
