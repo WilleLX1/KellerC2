@@ -4,7 +4,8 @@ This repository contains a simple example of a command and control setup with a
 Python web server and a minimal C++ client. The server keeps track of clients
 that register with it and exposes an endpoint to view the list of currently
 connected clients. The server also allows sending commands to individual
-clients and stores their latest results.
+clients and stores their latest results.  Each client now reports its **public
+IP address** so the server can display an approximate location on a map.
 
 ## Server
 
@@ -24,12 +25,12 @@ By default the server listens on port `8000`.
 
 ### Endpoints
 
-- `POST /register` – Clients post a JSON payload `{"client_id": "<id>"}` to
-  register themselves.
-- `GET /clients` – Returns a JSON array with objects describing each
-  connected client: `[{"id": "<id>", "lat": <latitude>, "lon": <longitude>}]`.
-  The latitude and longitude are estimated from the client's IP address.
-
+- `POST /register` – Clients post a JSON payload
+  `{"client_id": "<id>", "public_ip": "<ip>"}` to register themselves.
+- `GET /clients` – Returns a JSON array describing each connected client:
+  `[{"id": "<id>", "ip": "<ip>", "lat": <latitude>, "lon": <longitude>,
+  "result": "<last>"}]`. The latitude and longitude are estimated from the
+  reported public IP.
 - `GET /poll?client_id=<id>` – Long polls the server for a pending command for
   the given client. Returns `{"command": "..."}`.
 - `POST /result` – Clients post back command results using a JSON payload
@@ -42,8 +43,10 @@ By default the server listens on port `8000`.
 ## Client
 
 `client.cpp` demonstrates a small program that connects to the server and
-registers itself. When it receives a command, the client now executes it on the
-local system and sends the command output back to the server.
+registers itself. On startup it contacts `api.ipify.org` to determine its
+public IP address and includes that when registering. When it receives a
+command, the client executes it on the local system and sends the command output
+back to the server.
 
 ### Building the client (Windows)
 
@@ -75,7 +78,7 @@ header, which lets it handle large command output reliably.
 
 After running one or more clients, visiting `http://localhost:8000/` opens a
 web page with a world map. Each connected client appears as a marker on the
-map. The server estimates each client's location using its IP address so the
-markers roughly indicate where clients are connecting from. Clicking a marker
-reveals a small form for sending a command to that client and displays its
-most recent result.
+map. The server estimates each client's location using the public IP reported
+by the client so the markers roughly indicate where clients are connecting
+from. Clicking a marker reveals the client's ID, its IP address, a small form
+for sending a command and displays its most recent result.

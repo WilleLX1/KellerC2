@@ -7,7 +7,6 @@ import json
 import queue
 import random
 
-
 INDEX_PAGE = """
 <html>
 <head>
@@ -27,14 +26,17 @@ INDEX_PAGE = """
         clients.forEach(c => {
             if (!markers[c.id]) {
                 const m = L.marker([c.lat, c.lon]).addTo(map);
-                m.bindPopup(`<b>${c.id}</b><br>
+                m.bindPopup(`<b>${c.id}</b><br>IP: ${c.ip}<br>
                     <form onsubmit=\"sendCmd(event,this,'${c.id}')\">
                     <input name=cmd placeholder=Command />
                     <button type=submit>Send</button>
                     </form><pre id=res_${c.id}></pre>`);
                 markers[c.id] = m;
+            } else {
+                markers[c.id].setLatLng([c.lat, c.lon]);
             }
-            fetchResult(c.id);
+            const pre = document.getElementById('res_'+c.id);
+            if (pre) pre.textContent = c.result || '';
         });
     }
 
@@ -47,13 +49,6 @@ INDEX_PAGE = """
             body: JSON.stringify({client_id:id, command:cmd})
         });
         form.cmd.value='';
-    }
-
-    async function fetchResult(id) {
-        const r = await fetch('/result?client_id='+id);
-        const data = await r.json();
-        const pre = document.getElementById('res_'+id);
-        if (pre) pre.textContent = data.result || '';
     }
 
     window.onload = () => {
@@ -76,6 +71,7 @@ clients = set()
 client_queues = {}
 client_results = {}
 client_locations = {}
+client_ips = {}
 
 def geolocate(ip):
     """Return (lat, lon) for the given IP using ip-api.com."""
@@ -98,14 +94,15 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 payload = json.loads(data.decode())
                 client_id = payload.get('client_id')
+                ip = payload.get('public_ip') or self.client_address[0]
             except Exception:
                 pass
             if client_id:
                 clients.add(client_id)
                 client_queues.setdefault(client_id, queue.Queue())
                 client_results.setdefault(client_id, '')
+                client_ips[client_id] = ip
                 if client_id not in client_locations:
-                    ip = self.client_address[0]
                     client_locations[client_id] = geolocate(ip)
                 body = b'Registered'
                 self.send_response(200)
@@ -168,8 +165,10 @@ class Handler(BaseHTTPRequestHandler):
             body = json.dumps([
                 {
                     'id': cid,
+                    'ip': client_ips.get(cid, ''),
                     'lat': client_locations.get(cid, (0, 0))[0],
-                    'lon': client_locations.get(cid, (0, 0))[1]
+                    'lon': client_locations.get(cid, (0, 0))[1],
+                    'result': client_results.get(cid, '')
                 }
                 for cid in sorted(clients)
             ]).encode()
