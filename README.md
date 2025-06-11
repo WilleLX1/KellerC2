@@ -48,6 +48,7 @@ be changed by setting the `REMOVE_CLIENT_AFTER` environment variable.
   client.
 - `GET /history?client_id=<id>` – Returns up to 10 recent results for a client
   as `[{"result": "<output>", "ts": <epoch_seconds>}, ...]`.
+- `GET /commands?client_id=<id>` – Returns up to 10 recent commands queued for a client as `[{"command": "<cmd>", "ts": <epoch_seconds>}, ...]`.
 
 ## Client
 
