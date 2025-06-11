@@ -177,6 +177,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header('Content-Length', str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+
         elif parsed.path == '/poll':
             qs = parse_qs(parsed.query)
             cid = qs.get('client_id', [None])[0]
