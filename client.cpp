@@ -51,13 +51,13 @@ std::string send_request(const addrinfo* res, const std::string& req) {
             std::cerr << "socket creation failed" << std::endl;
             return "";
         }
-        // set a receive timeout so recv doesn't block forever
+        // set a ~35s receive timeout so poll responses can arrive
 #ifdef _WIN32
-        DWORD timeout = 5000;
+        DWORD timeout = 35000;
         setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
 #else
         timeval tv{};
-        tv.tv_sec = 5;
+        tv.tv_sec = 35;
         setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 #endif
         if (connect(sock, res->ai_addr, (int)res->ai_addrlen) == SOCKET_ERROR) {

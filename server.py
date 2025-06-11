@@ -87,6 +87,13 @@ def geolocate(ip):
     return random.uniform(-60, 60), random.uniform(-180, 180)
 
 class Handler(BaseHTTPRequestHandler):
+    def _safe_write(self, body: bytes) -> None:
+        """Write to the socket, ignoring errors if the client disconnected."""
+        try:
+            self.wfile.write(body)
+        except OSError:
+            pass
+
     def do_POST(self):
         length = int(self.headers.get('Content-Length', 0))
         data = self.rfile.read(length)
@@ -114,13 +121,13 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header('Content-Length', str(len(body)))
                 self.end_headers()
-                self.wfile.write(body)
+                self._safe_write(body)
             else:
                 body = b'Bad Request'
                 self.send_response(400)
                 self.send_header('Content-Length', str(len(body)))
                 self.end_headers()
-                self.wfile.write(body)
+                self._safe_write(body)
         elif self.path == '/send':
             try:
                 payload = json.loads(data.decode())
@@ -132,7 +139,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_response(200)
                     self.send_header('Content-Length', str(len(body)))
                     self.end_headers()
-                    self.wfile.write(body)
+                    self._safe_write(body)
                     return
             except Exception:
                 pass
@@ -140,7 +147,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(400)
             self.send_header('Content-Length', str(len(body)))
             self.end_headers()
-            self.wfile.write(body)
+            self._safe_write(body)
         elif self.path == '/result':
             try:
                 payload = json.loads(data.decode())
@@ -152,7 +159,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_response(200)
                     self.send_header('Content-Length', str(len(body)))
                     self.end_headers()
-                    self.wfile.write(body)
+                    self._safe_write(body)
                     return
             except Exception:
                 pass
@@ -160,7 +167,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(400)
             self.send_header('Content-Length', str(len(body)))
             self.end_headers()
-            self.wfile.write(body)
+            self._safe_write(body)
         else:
             self.send_response(404)
             self.end_headers()
@@ -182,7 +189,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header('Content-Type', 'application/json')
             self.send_header('Content-Length', str(len(body)))
             self.end_headers()
-            self.wfile.write(body)
+            self._safe_write(body)
         elif parsed.path == '/poll':
             qs = parse_qs(parsed.query)
             cid = qs.get('client_id', [None])[0]
@@ -196,7 +203,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header('Content-Type', 'application/json')
                 self.send_header('Content-Length', str(len(body)))
                 self.end_headers()
-                self.wfile.write(body)
+                self._safe_write(body)
             else:
                 self.send_response(404)
                 self.send_header('Content-Length', '0')
@@ -210,7 +217,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header('Content-Type', 'application/json')
                 self.send_header('Content-Length', str(len(body)))
                 self.end_headers()
-                self.wfile.write(body)
+                self._safe_write(body)
             else:
                 self.send_response(404)
                 self.send_header('Content-Length', '0')
@@ -221,7 +228,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header('Content-Type', 'text/html')
             self.send_header('Content-Length', str(len(body)))
             self.end_headers()
-            self.wfile.write(body)
+            self._safe_write(body)
         else:
             self.send_response(404)
             self.send_header('Content-Length', '0')
