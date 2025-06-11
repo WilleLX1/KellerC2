@@ -9,7 +9,6 @@ import sqlite3
 import threading
 import time
 import os
-import html
 
 INDEX_PAGE = """
 <html>
@@ -27,6 +26,12 @@ INDEX_PAGE = """
     const STALE = 60000; // fade after 1 min
     const REMOVE = 300000; // remove after 5 min
 
+    function escapeHtml(s) {
+        const div = document.createElement('div');
+        div.textContent = s;
+        return div.innerHTML;
+    }
+
     function popupContent(c) {
         const ts = new Date(c.last_seen * 1000).toLocaleString();
         return `<b>${c.id}</b><br>IP: ${c.ip}<br>Last seen: ${ts}<br>
@@ -34,7 +39,7 @@ INDEX_PAGE = """
             <input name=cmd placeholder=Command />
             <button type=submit>Send</button>
             <span id=msg_${c.id}></span>
-            </form><pre id=res_${c.id}>${html.escape(c.result || '')}</pre>`;
+            </form><pre id=res_${c.id}>${escapeHtml(c.result || '')}</pre>`;
     }
 
     async function load() {
