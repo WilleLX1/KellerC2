@@ -9,6 +9,7 @@ import sqlite3
 import threading
 import time
 import os
+import html
 
 INDEX_PAGE = """
 <html>
@@ -32,7 +33,7 @@ INDEX_PAGE = """
             <form onsubmit=\"sendCmd(event,this,'${c.id}')\">
             <input name=cmd placeholder=Command />
             <button type=submit>Send</button>
-            </form><pre id=res_${c.id}>${c.result || ''}</pre>`;
+            </form><pre id=res_${c.id}>${html.escape(c.result || '')}</pre>`;
     }
 
     async function load() {
