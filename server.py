@@ -72,6 +72,7 @@ client_queues = {}
 client_results = {}
 client_locations = {}
 client_ips = {}
+ip_counts = {}
 
 def geolocate(ip):
     """Return (lat, lon) for the given IP using ip-api.com."""
@@ -102,8 +103,13 @@ class Handler(BaseHTTPRequestHandler):
                 client_queues.setdefault(client_id, queue.Queue())
                 client_results.setdefault(client_id, '')
                 client_ips[client_id] = ip
+                ip_counts[ip] = ip_counts.get(ip, 0) + 1
                 if client_id not in client_locations:
-                    client_locations[client_id] = geolocate(ip)
+                    lat, lon = geolocate(ip)
+                    if ip_counts[ip] > 1:
+                        lat += random.uniform(-0.02, 0.02)
+                        lon += random.uniform(-0.02, 0.02)
+                    client_locations[client_id] = (lat, lon)
                 body = b'Registered'
                 self.send_response(200)
                 self.send_header('Content-Length', str(len(body)))
@@ -177,7 +183,6 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header('Content-Length', str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-
         elif parsed.path == '/poll':
             qs = parse_qs(parsed.query)
             cid = qs.get('client_id', [None])[0]

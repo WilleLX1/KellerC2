@@ -80,5 +80,7 @@ After running one or more clients, visiting `http://localhost:8000/` opens a
 web page with a world map. Each connected client appears as a marker on the
 map. The server estimates each client's location using the public IP reported
 by the client so the markers roughly indicate where clients are connecting
-from. Clicking a marker reveals the client's ID, its IP address, a small form
-for sending a command and displays its most recent result.
+from. If multiple clients share the same IP, the server adds a small random
+offset to each one so their markers don't overlap. Clicking a marker reveals
+the client's ID, its IP address, a small form for sending a command and
+displays its most recent result.
