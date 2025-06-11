@@ -29,6 +29,7 @@ By default the server listens on port `8000`.
 - `GET /clients` – Returns a JSON array with objects describing each
   connected client: `[{"id": "<id>", "lat": <latitude>, "lon": <longitude>}]`.
   The latitude and longitude are estimated from the client's IP address.
+
 - `GET /poll?client_id=<id>` – Long polls the server for a pending command for
   the given client. Returns `{"command": "..."}`.
 - `POST /result` – Clients post back command results using a JSON payload
