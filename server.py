@@ -33,6 +33,7 @@ INDEX_PAGE = """
             <form onsubmit=\"sendCmd(event,this,'${c.id}')\">
             <input name=cmd placeholder=Command />
             <button type=submit>Send</button>
+            <span id=msg_${c.id}></span>
             </form><pre id=res_${c.id}>${html.escape(c.result || '')}</pre>`;
     }
 
@@ -69,11 +70,26 @@ INDEX_PAGE = """
     async function sendCmd(e, form, id) {
         e.preventDefault();
         const cmd = form.cmd.value;
-        await fetch('/send', {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({client_id:id, command:cmd})
-        });
+        const msg = document.getElementById('msg_'+id);
+        msg.textContent = '';
+        try {
+            const res = await fetch('/send', {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({client_id:id, command:cmd})
+            });
+            if (res.ok) {
+                msg.textContent = 'Queued';
+                msg.style.color = 'green';
+            } else {
+                const text = await res.text();
+                msg.textContent = text || 'Error';
+                msg.style.color = 'red';
+            }
+        } catch (err) {
+            msg.textContent = 'Error';
+            msg.style.color = 'red';
+        }
         form.cmd.value='';
     }
 
