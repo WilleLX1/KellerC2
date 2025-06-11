@@ -28,6 +28,9 @@ All client registrations, queued commands and results are stored in an
 endpoint its `last_seen` timestamp is updated. A background task runs every
 minute to remove clients that have not been seen for an hour. The interval can
 be changed by setting the `REMOVE_CLIENT_AFTER` environment variable.
+The server keeps the most recent 100 command results for each client. This
+limit can be adjusted by setting the `RESULT_HISTORY_LIMIT` environment
+variable.
 
 ### Endpoints
 
@@ -47,7 +50,8 @@ be changed by setting the `REMOVE_CLIENT_AFTER` environment variable.
 - `GET /result?client_id=<id>` – Retrieves the latest stored result for a
   client.
 - `GET /history?client_id=<id>` – Returns up to 10 recent results for a client
-  as `[{"result": "<output>", "ts": <epoch_seconds>}, ...]`.
+  as `{"result": "<output>", "ts": <epoch_seconds>}, ...]`. The server retains
+  at most 100 results per client unless `RESULT_HISTORY_LIMIT` is set.
 - `GET /commands?client_id=<id>` – Returns up to 10 recent commands queued for a client as `[{"command": "<cmd>", "ts": <epoch_seconds>}, ...]`.
 
 ## Client

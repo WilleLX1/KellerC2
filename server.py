@@ -178,6 +178,8 @@ with conn_lock, conn:
     )
 
 REMOVE_CLIENT_AFTER = int(os.environ.get('REMOVE_CLIENT_AFTER', '3600'))
+# keep at most this many results per client
+RESULT_HISTORY_LIMIT = int(os.environ.get('RESULT_HISTORY_LIMIT', '100'))
 
 def cleanup_task():
     while True:
@@ -304,6 +306,11 @@ class Handler(BaseHTTPRequestHandler):
                         conn.execute(
                             'INSERT INTO results(client_id, result, ts) VALUES (?,?,?)',
                             (cid, res, now)
+                        )
+                        conn.execute(
+                            'DELETE FROM results WHERE client_id=? AND id NOT IN ('
+                            'SELECT id FROM results WHERE client_id=? ORDER BY id DESC LIMIT ?)',
+                            (cid, cid, RESULT_HISTORY_LIMIT)
                         )
                         conn.commit()
                         body = b'Result stored'
